@@ -1,0 +1,245 @@
+---
+title: "Working with Geospatial Data"
+output: html_notebook
+---
+
+## The US Geological Survey, the National Park Service, and the Washington State Department of Natural Resources are some of the few organizations that make enormous stockpiles of spatial data available to the public. There are powerful libraries in R such as rgdal and sp that allow R to use .shp files, and provide functions to read and convert spatial data into easy-to-work-with R objects.
+
+### An example by Steven Brey @ mazamascience.com using the Watershed Resource Inventory Area (WRIA) spatial data from the Washington State Department of Ecology is worked again in this R Notebook.
+
+#### Data:      ftp://www.ecy.wa.gov/gis_a/hydro/wria.zip
+#### Metadata:  http://www.ecy.wa.gov/services/gis/data/hydro/wria.htm
+<br>
+```{r, echo=FALSE}
+# load the required libraries 
+library(sp) 
+library(rgdal)
+```
+
+#### First create a local directory to load the data from the Washington department of ecology website
+
+```{r}
+localDir <- 'R_GIS_data'
+if (!file.exists(localDir)) {
+  dir.create(localDir)
+}
+```
+
+#### Download the 5mb file of WRIA data
+
+```{r}
+url <- 'ftp://www.ecy.wa.gov/gis_a/inlandWaters/wria.zip'
+file <- paste(localDir,basename(url),sep='/')
+if (!file.exists(file)) {
+  download.file(url, file)
+  unzip(file,exdir=localDir)
+}
+```
+
+#### Show the unzipped files
+
+```{r}
+list.files(localDir)
+```
+```{r}
+# layerName is the name of the unzipped shapefile without file type extensions 
+layerName <- "WRIA_poly"  
+# Read in the data
+data_projected <- readOGR(dsn=localDir, layer=layerName) 
+
+# What is this thing and what's in it?
+class(data_projected)
+slotNames(data_projected)
+# It's an S4 "SpatialPolygonsDataFrame" object with the following slots:
+# [1] "data"        "polygons"    "plotOrder"   "bbox"        "proj4string"
+
+# What does the data look like with the default plotting command? 
+plot(data_projected)
+```
+```{r}
+# Could use names(data_projected@data) or just:
+names(data_projected)
+#["WRIA_ID"    "WRIA_NR"    "WRIA_AREA_" "WRIA_NM"    "Shape_Leng" "Shape_Area"
+
+# Identify the attributes to keep and associate new names with them
+attributes <- c("WRIA_NR", "WRIA_AREA_", "WRIA_NM")
+# user friendly names 
+newNames <- c( "number", "area", "name")
+
+# Subset the full dataset extracting only the desired attributes
+data_projected_subset <- data_projected[,attributes]
+
+# Assign the new attribute names
+names(data_projected_subset) <- newNames
+
+# Create a dataframe name (potentially different from layerName)
+data_name <- "WRIA"
+
+# Reproject the data onto a "longlat" projection and assign it to the new name
+assign(data_name,spTransform(data_projected_subset, CRS("+proj=longlat")))
+
+# NOTE: If using assign() above gave you an error it is likely the version of 
+# NOTE: R you are using does not currently support the sp package. Use R 
+# NOTE: 2.15.3 instead. 
+
+# The WRIA dataset is now projected in latitude longitude coordinates as a
+# SpatialPolygonsDataFrame.  We save the converted data as .RData for faster
+# loading in the future.
+save(list=c(data_name),file=paste(localDir,"WAWRIAs.RData",sep="/"))
+
+# Upon inspecting the metadata you can see that the first 19 areas in WRIA
+# surround Puget Sound. The names of the first 19 watersheds in WRIA are
+WRIA$name[1:19]
+
+# For fun, save a subset including only only these 19 areas
+PSWRIANumbers <- c(1:19)
+WRIAPugetSound <- WRIA[WRIA$number %in% PSWRIANumbers,]
+# Sanity check, plot WRIAPugetSound to make sure it looks like the subset we want
+plot(WRIAPugetSound)
+
+# Save Puget Sound data as an RData file which we can quickly "load()"
+data_name <- "WRIAPugetSound"
+save(list=c(data_name),file=paste(localDir,"WRIAPugetSound.RData",sep="/"))
+```
+```{r}
+# Load the data that was converted to SpatialPolygonsDataFrame
+# NOTE: This can be skipped (but does not have to be) if the spatial
+# NOTE: objects are still in your workspace.
+
+# Load and show the names of the attributes in WRIA
+file <- paste(localDir,"WAWRIAs.RData",sep="/")
+load(file) 
+names(WRIA)
+
+file <- paste(localDir,"WAWRIAs.RData",sep="/")
+load(file)
+names(WRIAPugetSound)
+
+# Sweet.  We can see that this is the WRIA dataset we saved earlier
+
+# NOTE: For more advanced users, slotNames(WRIA) will list the structures 
+# in WRIA. Using the @ command allows you to grab a particular slot from the
+# spatial object.  If you really want the HUGE AND GORY details of what's
+# in this object, you can examine the full structure with str(WRIA).
+
+# Here is how you would extract the contents of slots for easier use.
+WriaData <- WRIA@data
+WriaBbox <- WRIA@bbox
+
+# We have a pretty good idea of what kind of data we are working with 
+# and what it looks like. Now its time for the data to answer some
+# questions and tell us a story.
+
+# What is the biggest water resource area in Washington? 
+maxArea <- max(WRIA$area)
+# Create a 'mask' identifying the biggest area so we can find out its name
+# NOTE:  Eaach 'mask' we create is a vector of TRUE/FALSE values that we
+# NOTE:  will use to subset the dataframe.
+biggestAreaMask <- which(WRIA$area == maxArea)
+biggestAreaName <- WRIA$name[biggestAreaMask]
+biggestAreaName
+
+# Create a SpatialPolygonsDataFrame subset
+biggestArea <- WRIA[biggestAreaMask,]
+
+# plot biggest area in blue with a title
+plot(biggestArea, col="blue")
+title(biggestAreaName) 
+
+# NOTE: Many more plot arguments can be explored by investigating 
+# NOTE: the "SpatialPolygons" "plot-method" in the sp package
+```
+```{r}
+# I have heard of a water resource management area in Washington State
+# called Pend Oreille.  Where is it located in this dataframe?
+which(WriaData$name == "Pend Oreille")
+
+# Now we have isolated the watershed with the largest area as well as the
+# fabled Pend Oreille.  Lets figure out how to highlight these regions when
+# plotting all  regions. I have also heard that Lake Chelan is Beautiful.
+# Lets isolate it as well.
+
+# Each of the following makes a spatialPolygonsDataFrame subset, selecting 
+# a specific region based on some selected attribute in WRIA.
+
+WRIA_puget <- WRIA[WRIA$number %in% PSWRIANumbers,]
+WRIA_chelan <- WRIA[WRIA$name == "Chelan",]
+WRIA_Pend_Oreille <- WRIA[WRIA$name == "Pend Oreille",]
+
+# Check out what they look like plotted individually 
+plot(WRIA_puget)
+plot(WRIA_chelan)
+plot(WRIA_Pend_Oreille)
+
+# For fun we will make 8 different watersheds 8 different colors!
+watersheds <- c(1:8)
+watershed_colors <- c("burlywood1","forestgreen","burlywood3","darkolivegreen3",
+                      "cadetblue4","sienna3","cadetblue3","darkkhaki")
+
+watershed_color_variation <- WRIA[WRIA$number %in% watersheds,]
+
+# Plot some of the created spatial objects together
+plot(WRIA)
+plot(WRIA_puget,add=TRUE,col="navy")
+plot(WRIA_chelan,add=TRUE,col="red2")
+plot(watershed_color_variation, add=TRUE, col=watershed_colors)
+plot(WRIA_Pend_Oreille,add=TRUE,col="red4")
+
+# NOTE:  gCentroid is from the 'rgeos' package
+library(rgeos)
+# Find the center of each region and label lat and lon of centers
+centroids <- gCentroid(WRIA, byid=TRUE)
+centroidLons <- coordinates(centroids)[,1]
+centroidLats <- coordinates(centroids)[,2]
+
+# Find regions with center East of -121 longitude (East of Cascade mountains) 
+eastSideMask <- centroidLons > -121
+
+# Create spatialPolygonsDataFrame for these regions
+WRIA_nonPacific <- WRIA[eastSideMask,]
+
+# Find watersheds with area 75th percentile or greater
+basinAreaThirdQuartile <- quantile(WRIA$area,0.75)
+largestBasinsMask <- WRIA$area >= basinAreaThirdQuartile
+
+WRIA_largest <- WRIA[largestBasinsMask,]
+
+# To get legend and labels to fit on the figure we can change the size of the
+# area plotting. bbox(WRIA) shows the bounding lat and long of WRIA.
+bBox <- bbox(WRIA)
+ynudge <- 0.5
+xnudge <- 3
+xlim <- c(bBox[1,1] + xnudge , bBox[1,2] - xnudge)
+ylim <- c(bBox[2,1] - ynudge, bBox[2,2] )
+
+# Plot some of the different spatial objects and show lat-long axis, 
+# label watersheds
+plot(WRIA,axes=TRUE,xlim=xlim,ylim=ylim)
+plot(WRIA_nonPacific,add=TRUE,col="red") 
+plot(WRIA_puget,add=TRUE,col="navy")
+plot(WRIA_largest,add=TRUE,density=20,col="green1")
+text(centroidLons, centroidLats, labels=WRIA$number, col="blue", cex=.7)
+
+title(main="Washington Watersheds")
+labels <- c("Puget Sound Watersheds", "Washington's biggest watersheds",
+            "drain to Pacific via Columbia river") 
+label_cols <- c("navy","green1","red")
+legend("bottomleft", NULL, labels, fill=label_cols, density, bty="n", cex=.8)
+```
+```{r}
+# Lets get a taste of what some of the built in plotting functions in the map
+# tools package can do
+
+# First load
+library("maptools")
+
+allWashingtonAreas <- spplot(WRIA, zcol="area", identify=TRUE)
+
+# by saving as object more than one plot can be shown on a panel
+pugetSoundAreas <- spplot(WRIA_puget, zcol="area", identify=TRUE)
+
+# Open new plot frame
+frame()
+print(allWashingtonAreas, position=c(0,.5,.5,1), more=T)
+print(pugetSoundAreas, position=c(.5,.5,1,1), more=T)
+```
